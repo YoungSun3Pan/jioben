@@ -19,15 +19,20 @@ import wave
 import pyaudio
 from paddleocr import PaddleOCR
 import os
+import threading
 os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 from utils import get_input_box, temmatchimg
 #import pdb;pdb.set_trace()
+
 taozhi_sum = 118633
 chilun_sum = [86593, 46263]
 congwu = [187770,100213]
 jiantou = [13510, 7206]
-class windows_control:
-    def __init__(self, windows_X=0, windows_Y=0):
+class windows_control(threading.Thread):
+    def __init__(self, name, windows_X=0, windows_Y=0):
+        threading.Thread.__init__(self)
+        self.name = name
+        self.fightting_flag = False
         self.cur_pos = (0,0)
         self.windows_pos = (windows_X, windows_Y)
         self.count = 0
@@ -40,9 +45,21 @@ class windows_control:
         self.windows = self.get_windows()
         self.widows_region = self.get_window_rect()
         self.ocr_model = PaddleOCR(use_angle_cls=False, use_gpu=False)
-    def main(self):
-        
-        
+
+    def run(self):
+        if self.name == 'fightting_daemon':
+            self.fightting_daemon()
+        elif self.name == 'main_loop':
+            self.main_loop()
+
+    def fightting_daemon(self):
+        while True:
+            threadLock.acquire()
+            self.fightting_flag = self.is_battle()
+            threadLock.release()
+            time.sleep(0.1)
+
+    def main_loop(self):
         self.set_foreground() #设置线程到前景,并将窗口设置到指定位置
         self.init_pos()
         #img = self.get_cap_screen(self.get_window_rect())
@@ -164,27 +181,24 @@ class windows_control:
             self.click_left(X=closs_button[0], Y=closs_button[1])
 
             time.sleep(0.1)
-            pred_position = self.get_position()[1]
+            # pred_position = self.get_position()[1]
 
             while True:
+                img_before = self.get_cap_screen(self.get_window_rect())
                 time.sleep(3)
-                pos = self.get_position()
-                if pos:
-                    cur_position = pos[1]
-                    if np.abs(cur_position[0] - pred_position[0])>1 or \
-                        np.abs(cur_position[1] - pred_position[1])>1:
-                        pred_position = cur_position
-                        continue
-                    
-                    elif np.abs(cur_position[0] -ori_X)<=1 and \
-                            np.abs(cur_position[1] - ori_Y)<=1:
-                        #到达终点
-                        return True
-                    else:
-                        #如果停止了并且没到终点，则递归再走
-                        return self.move_to(X=ori_X, Y=ori_Y)
+                img_after = self.get_cap_screen(self.get_window_rect())
+                # pos = self.get_position()
+                h, w, c = img_after.shape
+                diff_ratio = np.sum(np.abs(img_before - img_after)) / (h*w*c*255)
+                # print(diff_ratio)
+                if diff_ratio < 0.1:
+                    #到达终点
+                    return True
+                else:
+                    #如果停止了并且没到终点，则递归再走
+                    return self.move_to(X=ori_X, Y=ori_Y)
             
-            return True
+            # return True
 
     def init_pos(self):
         #将游戏初始化到起始位置
@@ -274,9 +288,12 @@ class windows_control:
             return (rect.left, rect.top, rect.right, rect.bottom)
 
     def is_battle(self):
-        img = self.get_cap_screen((18, 151, 23, 156))
-        print (np.sum(img))
-        if np.sum(img) not in jiantou:
+        img = self.get_cap_screen((400, 40, 560, 100))
+        img = np.sum(img, axis=2)
+        a = np.where(img > 245 * 3)
+        num_white = len(a[0])
+        print(num_white)
+        if num_white > 500 :
             return True
         else:
             return False
@@ -655,8 +672,26 @@ class windows_control:
         self.click_left(X=761, Y=114)
         time.sleep(4)
         self.give_darts(X=626, Y=199)
-        return True          
+        return True
+
+threadLock = threading.Lock()
+threads = []
+
 if __name__ == '__main__':
     # start_listen()
-    wc = windows_control()
-    wc.main()
+    # 创建新线程
+    thread1 = windows_control('main_loop')
+    thread2 = windows_control('fightting_daemon')
+
+    # 开启新线程
+    thread1.start()
+    thread2.start()
+
+    # 添加线程到线程列表
+    threads.append(thread1)
+    threads.append(thread2)
+
+    # 等待所有线程完成
+    for t in threads:
+        t.join()
+    print("退出主线程")
